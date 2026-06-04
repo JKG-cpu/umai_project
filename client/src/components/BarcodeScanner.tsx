@@ -95,7 +95,7 @@ export default function BarcodeScanner({ onScanned, onClose }: Props) {
     if (!ctx) return null;
 
     ctx.drawImage(video, 0, 0, w, h);
-    return canvas.toDataURL("image/jpeg", 0.95);
+    return canvas.toDataURL("image/jpeg", 0.5);
   };
 
   const handleCapture = async () => {

@@ -1,11 +1,8 @@
 import { z } from "zod";
-import { execFile, execFileSync } from "child_process";
-import { promisify } from "util";
+import { spawn, execFileSync } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
 import { publicProcedure, router } from "../_core/trpc";
-
-const execFileAsync = promisify(execFile);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,20 +27,33 @@ function findPython(): string {
 
 async function runPythonScanner(mode: string, imageBase64: string) {
   const python = findPython();
-  const { stdout, stderr } = await execFileAsync(python, [
-    PYTHON_SCRIPT,
-    "--mode", mode,
-    "--image", imageBase64,
-  ], {
-    timeout: 30000,
-    maxBuffer: 10 * 1024 * 1024,
+  return new Promise<any>((resolve, reject) => {
+    const child = spawn(python, [PYTHON_SCRIPT, "--mode", mode], {
+      timeout: 30000,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+
+    child.stdout.on("data", (d: Buffer) => stdoutChunks.push(d));
+    child.stderr.on("data", (d: Buffer) => stderrChunks.push(d));
+
+    child.on("error", reject);
+
+    child.on("close", (code) => {
+      const stderr = Buffer.concat(stderrChunks).toString();
+      if (stderr) console.error("[python-scanner] stderr:", stderr);
+      try {
+        resolve(JSON.parse(Buffer.concat(stdoutChunks).toString()));
+      } catch {
+        reject(new Error(`Invalid Python output (exit ${code})`));
+      }
+    });
+
+    child.stdin.write(imageBase64);
+    child.stdin.end();
   });
-
-  if (stderr) {
-    console.error("[python-scanner] stderr:", stderr);
-  }
-
-  return JSON.parse(stdout);
 }
 
 export const scannerRouter = router({

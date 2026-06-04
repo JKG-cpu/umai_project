@@ -37,7 +37,7 @@ def main():
             if result["quantity"]:
                 print(f"Qty:     {result['quantity']}")
         else:
-            print(f"Product: (not found in Open Food Facts)")
+            print(f"Product: (not found in any database)")
 
         print()
 

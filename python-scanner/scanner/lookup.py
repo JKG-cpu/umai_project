@@ -1,14 +1,20 @@
+import os
 import re
+
 import requests
+
+_TIMEOUT = 10
+_HEADERS = {"User-Agent": "Python-Scanner/0.2.0"}
+_FDC_API_KEY = os.environ.get("FDC_API_KEY")
 
 _API_BASES = [
     "https://world.openfoodfacts.org/api/v3/product/{}.json",
     "https://world.openbeautyfacts.org/api/v3/product/{}.json",
     "https://world.openpetfoodfacts.org/api/v3/product/{}.json",
 ]
-_TIMEOUT = 10
-_HEADERS = {"User-Agent": "Umai/1.0.0"}
 
+
+# ── GS1 Application Identifier expiry parsing ──────────────────────────
 
 def _parse_expiration_date(raw: str | None) -> str | None:
     if not raw:
@@ -29,8 +35,6 @@ def _parse_expiration_date(raw: str | None) -> str | None:
     return raw
 
 
-# GS1 Application Identifier lengths (2-digit AI code -> data length in chars)
-# -1 = variable length (terminated by FNC1 or end of string)
 _GS1_AI_LENGTHS: dict[str, int] = {
     "00": 18, "01": 14, "02": 14,
     "10": -1, "11": 6, "12": 6, "13": 6, "15": 6, "16": 6, "17": 6,
@@ -61,6 +65,9 @@ def _gs1_ai_length(ai: str) -> int | None:
 def _decode_gs1_expiry(barcode_data: str) -> str | None:
     i = 0
     while i < len(barcode_data):
+        if barcode_data[i] == "\x1d":
+            i += 1
+            continue
         ai_start = i
         ai = barcode_data[i:i+2]
         ai_len = _gs1_ai_length(ai)
@@ -96,7 +103,13 @@ def _decode_gs1_expiry(barcode_data: str) -> str | None:
     return None
 
 
-def _lookup_one(barcode: str, url_template: str) -> dict | None:
+def extract_expiry_from_barcode(barcode_data: str) -> str | None:
+    return _decode_gs1_expiry(barcode_data)
+
+
+# ── Product database lookups ──────────────────────────────────────────
+
+def _lookup_openfoodfacts(barcode: str, url_template: str) -> dict | None:
     url = url_template.format(barcode)
     try:
         resp = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
@@ -116,16 +129,98 @@ def _lookup_one(barcode: str, url_template: str) -> dict | None:
         "quantity": product.get("quantity"),
         "categories": product.get("categories"),
         "expiration_date": _parse_expiration_date(product.get("expiration_date")),
+        "source": "Open Food Facts",
+    }
+
+
+def _lookup_upcitemdb(barcode: str) -> dict | None:
+    url = f"https://api.upcitemdb.com/prod/trial/lookup?upc={barcode}"
+    try:
+        resp = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+        resp.raise_for_status()
+    except requests.RequestException:
+        return None
+
+    data = resp.json()
+    items = data.get("items", [])
+    if not items:
+        return None
+
+    item = items[0]
+    return {
+        "product_name": item.get("title"),
+        "brands": item.get("brand"),
+        "quantity": None,
+        "categories": item.get("category"),
+        "expiration_date": None,
+        "source": "UPCitemdb",
+    }
+
+
+def _lookup_gtinsearch(barcode: str) -> dict | None:
+    url = f"https://www.gtinsearch.org/api/items/{barcode}"
+    try:
+        resp = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+        resp.raise_for_status()
+    except requests.RequestException:
+        return None
+
+    data = resp.json()
+    if not data or data.get("gtin") != barcode:
+        return None
+
+    return {
+        "product_name": data.get("name"),
+        "brands": data.get("brand"),
+        "quantity": data.get("size"),
+        "categories": data.get("category"),
+        "expiration_date": None,
+        "source": "GTINsearch",
+    }
+
+
+def _lookup_usda(barcode: str) -> dict | None:
+    if not _FDC_API_KEY:
+        return None
+
+    url = "https://api.nal.usda.gov/fdc/v1/foods/search"
+    params = {
+        "query": barcode,
+        "api_key": _FDC_API_KEY,
+        "dataType": "Branded",
+        "pageSize": 1,
+    }
+    try:
+        resp = requests.get(url, params=params, headers=_HEADERS, timeout=_TIMEOUT)
+        resp.raise_for_status()
+    except requests.RequestException:
+        return None
+
+    data = resp.json()
+    foods = data.get("foods", [])
+    if not foods:
+        return None
+
+    food = foods[0]
+    return {
+        "product_name": food.get("description"),
+        "brands": food.get("brandName") or food.get("brandOwner"),
+        "quantity": food.get("packageWeight"),
+        "categories": food.get("foodCategory"),
+        "expiration_date": None,
+        "source": "USDA FoodData Central",
     }
 
 
 def lookup_barcode(barcode: str) -> dict | None:
-    for base in _API_BASES:
-        result = _lookup_one(barcode, base)
+    for template in _API_BASES:
+        result = _lookup_openfoodfacts(barcode, template)
         if result:
             return result
+
+    for func in (_lookup_upcitemdb, _lookup_gtinsearch, _lookup_usda):
+        result = func(barcode)
+        if result:
+            return result
+
     return None
-
-
-def extract_expiry_from_barcode(barcode_data: str) -> str | None:
-    return _decode_gs1_expiry(barcode_data)
