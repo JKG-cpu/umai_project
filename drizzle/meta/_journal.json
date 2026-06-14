@@ -8,6 +8,13 @@
       "when": 1777565538376,
       "tag": "0000_giant_zuras",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1778000000000,
+      "tag": "0001_receipt_voting",
+      "breakpoints": true
     }
   ]
 }

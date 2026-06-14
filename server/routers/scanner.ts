@@ -1,115 +1,102 @@
 import { z } from "zod";
-import { spawn, execFileSync } from "child_process";
-import path from "path";
-import { fileURLToPath } from "url";
-import { publicProcedure, router } from "../_core/trpc";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const PROJECT_ROOT = path.resolve(__dirname, "..", "..");
-const PYTHON_BIN = path.resolve(PROJECT_ROOT, "python-scanner", ".venv", "bin", "python");
-const PYTHON_SCRIPT = path.resolve(PROJECT_ROOT, "python-scanner", "server_endpoint.py");
-
-function findPython(): string {
-  try {
-    execFileSync(PYTHON_BIN, ["--version"], { stdio: "ignore" });
-    return PYTHON_BIN;
-  } catch {}
-  for (const cmd of ["python3", "python"]) {
-    try {
-      execFileSync(cmd, ["--version"], { stdio: "ignore" });
-      return cmd;
-    } catch {}
-  }
-  throw new Error("Python not found");
-}
-
-async function runPythonScanner(mode: string, imageBase64: string) {
-  const python = findPython();
-  return new Promise<any>((resolve, reject) => {
-    const child = spawn(python, [PYTHON_SCRIPT, "--mode", mode], {
-      timeout: 30000,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
-
-    child.stdout.on("data", (d: Buffer) => stdoutChunks.push(d));
-    child.stderr.on("data", (d: Buffer) => stderrChunks.push(d));
-
-    child.on("error", reject);
-
-    child.on("close", (code) => {
-      const stderr = Buffer.concat(stderrChunks).toString();
-      if (stderr) console.error("[python-scanner] stderr:", stderr);
-      try {
-        resolve(JSON.parse(Buffer.concat(stdoutChunks).toString()));
-      } catch {
-        reject(new Error(`Invalid Python output (exit ${code})`));
-      }
-    });
-
-    child.stdin.write(imageBase64);
-    child.stdin.end();
-  });
-}
+import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
+import { ocrReceipt } from "../scanner/ocr";
+import { detectStore } from "../scanner/store-detection";
+import { filterItemTokens } from "../scanner/token-filter";
+import { resolveToken, recordVote } from "../scanner/vote-service";
+import { getStores, upsertStore } from "../scanner/db";
 
 export const scannerRouter = router({
-  scanProduct: publicProcedure
+  scanReceipt: protectedProcedure
     .input(z.object({ image: z.string().min(1) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       try {
-        const result = await runPythonScanner("product", input.image);
+        const ocrText = await ocrReceipt(input.image);
+        const ocrLines = ocrText.split("\n").filter(Boolean);
+
+        const storeResult = detectStore(ocrLines);
+        const tokens = filterItemTokens(ocrText);
+
+        const items = await Promise.all(
+          tokens.map(async (token) => {
+            const resolved = await resolveToken(token, storeResult.storeId ?? "unknown");
+            return {
+              rawToken: token,
+              label: resolved.label,
+              locked: resolved.locked,
+              confidence: resolved.confidence,
+            };
+          })
+        );
+
         return {
-          success: result.success ?? false,
-          error: result.error ?? null,
-          barcode: result.barcode ?? null,
-          format: result.format ?? null,
-          productName: result.product_name ?? null,
-          brands: result.brands ?? null,
-          quantity: result.quantity ?? null,
-          categories: result.categories ?? null,
-          expirationDate: result.expiration_date ?? null,
+          success: true,
+          store: storeResult,
+          items,
+          ocrText: ocrText.slice(0, 2000),
         };
       } catch (err: any) {
-        console.error("[python-scanner] error:", err);
+        console.error("[scanner] scanReceipt error:", err);
         return {
           success: false,
-          error: err.message ?? "Scanner failed",
-          barcode: null,
-          format: null,
-          productName: null,
-          brands: null,
-          quantity: null,
-          categories: null,
-          expirationDate: null,
+          error: err.message ?? "Receipt scan failed",
+          store: null,
+          items: [],
+          ocrText: null,
         };
       }
     }),
 
-  scanExpiry: publicProcedure
-    .input(z.object({ image: z.string().min(1) }))
-    .mutation(async ({ input }) => {
+  submitVote: protectedProcedure
+    .input(
+      z.object({
+        storeId: z.string().min(1),
+        rawToken: z.string().min(1),
+        label: z.string().min(1),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
       try {
-        const result = await runPythonScanner("expiry", input.image);
-        return {
-          success: result.success ?? false,
-          error: result.error ?? null,
-          barcode: result.barcode ?? null,
-          format: result.format ?? null,
-          expirationDate: result.expiration_date ?? null,
-        };
+        await recordVote(ctx.user.openId, input.storeId, input.rawToken, input.label);
+        return { success: true };
       } catch (err: any) {
-        console.error("[python-scanner] error:", err);
-        return {
-          success: false,
-          error: err.message ?? "Expiry scan failed",
-          barcode: null,
-          format: null,
-          expirationDate: null,
-        };
+        console.error("[scanner] submitVote error:", err);
+        return { success: false, error: err.message ?? "Vote recording failed" };
       }
     }),
+
+  getTokenStatus: publicProcedure
+    .input(
+      z.object({
+        storeId: z.string().min(1),
+        rawToken: z.string().min(1),
+      })
+    )
+    .query(async ({ input }) => {
+      const resolved = await resolveToken(input.rawToken, input.storeId);
+      return resolved;
+    }),
+
+  confirmStore: protectedProcedure
+    .input(
+      z.object({
+        storeId: z.string().min(1),
+        storeName: z.string().min(1),
+        locale: z.string().min(1).max(8),
+      })
+    )
+    .mutation(async ({ input }) => {
+      try {
+        await upsertStore(input.storeId, input.storeName, input.locale);
+        return { success: true };
+      } catch (err: any) {
+        console.error("[scanner] confirmStore error:", err);
+        return { success: false, error: err.message ?? "Store confirmation failed" };
+      }
+    }),
+
+  getKnownStores: publicProcedure.query(async () => {
+    const stores = await getStores();
+    return stores;
+  }),
 });

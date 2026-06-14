@@ -261,9 +261,10 @@ export default function HomePage() {
 
   const handleProductScanned = (product: ScannedProduct) => {
     setCurrentPage("home");
+    const firstLabel = product.items?.[0]?.label ?? "";
     setNewIngredient({
-      name: product.productName ?? "",
-      expirationDate: product.expirationDate ?? "",
+      name: firstLabel,
+      expirationDate: "",
     });
     setShowAddModal(true);
   };
