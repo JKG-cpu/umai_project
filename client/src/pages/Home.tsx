@@ -261,12 +261,35 @@ export default function HomePage() {
 
   const handleProductScanned = (product: ScannedProduct) => {
     setCurrentPage("home");
-    const firstLabel = product.items?.[0]?.label ?? "";
-    setNewIngredient({
-      name: firstLabel,
-      expirationDate: "",
-    });
-    setShowAddModal(true);
+    const today = new Date();
+    const newIngredients: Ingredient[] = [];
+
+    for (const item of product.items) {
+      const name = item.label.trim();
+      const dateStr = (product.itemDates?.[item.rawToken] ?? "").trim();
+      if (!name || !dateStr) continue;
+
+      const parts = dateStr.split("/");
+      if (parts.length !== 3) continue;
+      const [d, m, y] = parts.map(Number);
+      if (!d || !m || !y || m < 1 || m > 12 || d < 1 || d > 31) continue;
+
+      const expirationDateObj = new Date(y, m - 1, d);
+      const daysUntilExpiration = Math.floor(
+        (expirationDateObj.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+      );
+
+      newIngredients.push({
+        id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+        name,
+        expirationDate: dateStr,
+        expirationColor: daysUntilExpiration <= 5 ? "red" : "green",
+      });
+    }
+
+    if (newIngredients.length > 0) {
+      setIngredients((prev) => [...prev, ...newIngredients]);
+    }
   };
 
   // Se la welcome screen è aperta, mostrala

@@ -10,6 +10,7 @@ export type ScannedReceiptItem = {
 
 export type ScannedProduct = {
   items: ScannedReceiptItem[];
+  itemDates: Record<string, string>;
   store: { storeId: string | null; chain: string | null; locale: string } | null;
   receiptText: string | null;
 };
@@ -37,6 +38,7 @@ export default function BarcodeScanner({ onScanned, onClose }: Props) {
   const [videoReady, setVideoReady] = useState(false);
 
   const [scanResult, setScanResult] = useState<ScannedProduct | null>(null);
+  const [itemDates, setItemDates] = useState<Record<string, string>>({});
 
   const scanReceiptMutation = trpc.scanner.scanReceipt.useMutation();
   const submitVoteMutation = trpc.scanner.submitVote.useMutation();
@@ -101,6 +103,19 @@ export default function BarcodeScanner({ onScanned, onClose }: Props) {
     return canvas.toDataURL("image/jpeg", 0.5);
   };
 
+  function formatDateInput(value: string): string {
+    const digits = value.replace(/\D/g, "").slice(0, 8);
+    let formatted = "";
+    if (digits.length > 0) formatted = digits.slice(0, 2);
+    if (digits.length > 2) formatted += "/" + digits.slice(2, 4);
+    if (digits.length > 4) formatted += "/" + digits.slice(4, 8);
+    return formatted;
+  }
+
+  function handleDateChange(rawToken: string, value: string) {
+    setItemDates((prev) => ({ ...prev, [rawToken]: formatDateInput(value) }));
+  }
+
   const handleCapture = async () => {
     const dataUrl = captureFrame();
     if (!dataUrl) {
@@ -122,11 +137,13 @@ export default function BarcodeScanner({ onScanned, onClose }: Props) {
 
       const scanned: ScannedProduct = {
         items: result.items ?? [],
+        itemDates: {},
         store: result.store,
         receiptText: result.ocrText,
       };
 
       setScanResult(scanned);
+      setItemDates({});
 
       if (!result.store?.storeId) {
         setPhase("store_confirm");
@@ -166,7 +183,7 @@ export default function BarcodeScanner({ onScanned, onClose }: Props) {
 
   const handleDone = () => {
     if (scanResult) {
-      onScanned(scanResult);
+      onScanned({ ...scanResult, itemDates });
       setPhase("done");
     }
   };
@@ -316,19 +333,27 @@ export default function BarcodeScanner({ onScanned, onClose }: Props) {
                   Store: {scanResult.store.storeId ?? "Unknown"}
                 </p>
               )}
-              <div className="space-y-3 mb-6">
+              <div className="space-y-2 mb-6">
                 {scanResult.items.map((item) => (
-                  <div key={item.rawToken} className="flex items-center justify-between gap-2">
+                  <div key={item.rawToken} className="flex items-center gap-2">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{item.rawToken}</p>
-                      <p className="text-xs text-white/60 truncate">
-                        {item.label}
+                      <p className="text-sm font-medium truncate">{item.label}</p>
+                      <p className="text-xs text-white/40 truncate">
+                        {item.rawToken}
                         {item.locked ? " 🔒" : item.confidence !== null ? ` (${Math.round(item.confidence * 100)}%)` : " (guess)"}
                       </p>
                     </div>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="DD/MM/YYYY"
+                      value={itemDates[item.rawToken] ?? ""}
+                      onChange={(e) => handleDateChange(item.rawToken, e.target.value)}
+                      className="w-28 bg-white/10 text-white text-xs px-2 py-1.5 rounded border border-white/20 focus:outline-none focus:border-primary placeholder-white/30 text-center"
+                    />
                     <button
                       onClick={() => handleConfirmItem(item.rawToken, item.label)}
-                      className="bg-green-600/80 hover:bg-green-600 text-white px-3 py-1 rounded text-xs shrink-0"
+                      className="bg-green-600/80 hover:bg-green-600 text-white px-2.5 py-1.5 rounded text-xs shrink-0 leading-none"
                     >
                       ✓
                     </button>
