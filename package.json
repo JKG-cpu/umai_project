@@ -14,7 +14,6 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@google-cloud/vision": "^5.3.7",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -59,6 +58,7 @@
     "express": "^4.21.2",
     "framer-motion": "^12.23.22",
     "input-otp": "^1.4.2",
+    "jimp": "^1.6.1",
     "jose": "^6.2.3",
     "lucide-react": "^0.453.0",
     "mysql2": "^3.22.4",
@@ -75,6 +75,7 @@
     "superjson": "^2.2.6",
     "tailwind-merge": "^3.3.1",
     "tailwindcss-animate": "^1.0.7",
+    "tesseract.js": "^7.0.0",
     "vaul": "^1.1.2",
     "wouter": "^3.3.5",
     "zod": "^4.1.12"
