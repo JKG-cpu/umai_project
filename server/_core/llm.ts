@@ -209,14 +209,37 @@ const normalizeToolChoice = (
   return toolChoice;
 };
 
-const resolveApiUrl = () =>
-  ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
-    ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
-    : "https://forge.manus.im/v1/chat/completions";
+type Provider = "deepseek" | "forge";
 
-const assertApiKey = () => {
-  if (!ENV.forgeApiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
+const getProvider = (): { name: Provider; apiKey: string; baseUrl: string; model: string; supportsThinking: boolean; maxTokens: number } => {
+  if (ENV.deepseekApi && ENV.deepseekApi.trim().length > 0) {
+    return {
+      name: "deepseek",
+      apiKey: ENV.deepseekApi,
+      baseUrl: ENV.deepseekBaseUrl.trim().length > 0
+        ? `${ENV.deepseekBaseUrl.replace(/\/$/, "")}/v1/chat/completions`
+        : "https://api.deepseek.com/v1/chat/completions",
+      model: "deepseek-reasoner",
+      supportsThinking: false,
+      maxTokens: 8192,
+    };
+  }
+
+  return {
+    name: "forge",
+    apiKey: ENV.forgeApiKey,
+    baseUrl: ENV.forgeApiUrl.trim().length > 0
+      ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
+      : "https://forge.manus.im/v1/chat/completions",
+    model: "gemini-2.5-flash",
+    supportsThinking: true,
+    maxTokens: 32768,
+  };
+};
+
+const assertApiKey = (provider: ReturnType<typeof getProvider>) => {
+  if (!provider.apiKey) {
+    throw new Error(`API key is not configured for provider "${provider.name}"`);
   }
 };
 
@@ -266,7 +289,8 @@ const normalizeResponseFormat = ({
 };
 
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
-  assertApiKey();
+  const provider = getProvider();
+  assertApiKey(provider);
 
   const {
     messages,
@@ -277,10 +301,12 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     output_schema,
     responseFormat,
     response_format,
+    maxTokens,
+    max_tokens,
   } = params;
 
   const payload: Record<string, unknown> = {
-    model: "gemini-2.5-flash",
+    model: provider.model,
     messages: messages.map(normalizeMessage),
   };
 
@@ -296,9 +322,12 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.tool_choice = normalizedToolChoice;
   }
 
-  payload.max_tokens = 32768
-  payload.thinking = {
-    "budget_tokens": 128
+  payload.max_tokens = maxTokens ?? max_tokens ?? provider.maxTokens;
+
+  if (provider.supportsThinking) {
+    payload.thinking = {
+      budget_tokens: 128,
+    };
   }
 
   const normalizedResponseFormat = normalizeResponseFormat({
@@ -312,11 +341,11 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.response_format = normalizedResponseFormat;
   }
 
-  const response = await fetch(resolveApiUrl(), {
+  const response = await fetch(provider.baseUrl, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${ENV.forgeApiKey}`,
+      authorization: `Bearer ${provider.apiKey}`,
     },
     body: JSON.stringify(payload),
   });
