@@ -209,31 +209,20 @@ const normalizeToolChoice = (
   return toolChoice;
 };
 
-type Provider = "deepseek" | "forge";
-
-const getProvider = (): { name: Provider; apiKey: string; baseUrl: string; model: string; supportsThinking: boolean; maxTokens: number } => {
-  if (ENV.deepseekApi && ENV.deepseekApi.trim().length > 0) {
-    return {
-      name: "deepseek",
-      apiKey: ENV.deepseekApi,
-      baseUrl: ENV.deepseekBaseUrl.trim().length > 0
-        ? `${ENV.deepseekBaseUrl.replace(/\/$/, "")}/v1/chat/completions`
-        : "https://api.deepseek.com/v1/chat/completions",
-      model: "deepseek-reasoner",
-      supportsThinking: false,
-      maxTokens: 8192,
-    };
+const getProvider = (): { name: string; apiKey: string; baseUrl: string; model: string; supportsThinking: boolean; maxTokens: number } => {
+  if (!ENV.deepseekApi || ENV.deepseekApi.trim().length === 0) {
+    throw new Error("DEEPSEEK_API is not configured");
   }
 
   return {
-    name: "forge",
-    apiKey: ENV.forgeApiKey,
-    baseUrl: ENV.forgeApiUrl.trim().length > 0
-      ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
-      : "https://forge.manus.im/v1/chat/completions",
-    model: "gemini-2.5-flash",
-    supportsThinking: true,
-    maxTokens: 32768,
+    name: "deepseek",
+    apiKey: ENV.deepseekApi,
+    baseUrl: ENV.deepseekBaseUrl.trim().length > 0
+      ? `${ENV.deepseekBaseUrl.replace(/\/$/, "")}/v1/chat/completions`
+      : "https://api.deepseek.com/v1/chat/completions",
+    model: "deepseek-reasoner",
+    supportsThinking: false,
+    maxTokens: 8192,
   };
 };
 
