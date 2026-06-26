@@ -90,16 +90,27 @@ export default function BarcodeScanner({ onScanned, onClose }: Props) {
     const canvas = canvasRef.current;
     if (!video || !canvas) return null;
 
-    const w = video.videoWidth;
-    const h = video.videoHeight;
+    let w = video.videoWidth;
+    let h = video.videoHeight;
     if (!w || !h) return null;
 
-    canvas.width = w;
-    canvas.height = h;
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
 
-    ctx.drawImage(video, 0, 0, w, h);
+    if (h > w) {
+      canvas.width = h;
+      canvas.height = w;
+      ctx.save();
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(video, -w / 2, -h / 2, w, h);
+      ctx.restore();
+    } else {
+      canvas.width = w;
+      canvas.height = h;
+      ctx.drawImage(video, 0, 0, w, h);
+    }
+
     return canvas.toDataURL("image/jpeg", 0.5);
   };
 
@@ -325,42 +336,46 @@ export default function BarcodeScanner({ onScanned, onClose }: Props) {
         )}
 
         {phase === "receipt_review" && scanResult && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/90 overflow-y-auto">
-            <div className="text-white p-6 max-w-sm w-full">
-              <p className="text-lg font-bold mb-1">Review items</p>
-              {scanResult.store && (
-                <p className="text-xs text-white/40 mb-4">
-                  Store: {scanResult.store.storeId ?? "Unknown"}
-                </p>
-              )}
-              <div className="space-y-2 mb-6">
-                {scanResult.items.map((item) => (
-                  <div key={item.rawToken} className="flex items-center gap-2">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{item.label}</p>
-                      <p className="text-xs text-white/40 truncate">
-                        {item.rawToken}
-                        {item.locked ? " 🔒" : item.confidence !== null ? ` (${Math.round(item.confidence * 100)}%)` : " (guess)"}
-                      </p>
+          <div className="absolute inset-0 flex flex-col bg-black/90">
+            <div className="flex-1 overflow-y-auto px-6 pt-6">
+              <div className="max-w-sm mx-auto">
+                <p className="text-lg font-bold mb-1 text-white">Review items</p>
+                {scanResult.store && (
+                  <p className="text-xs text-white/40 mb-4">
+                    Store: {scanResult.store.storeId ?? "Unknown"}
+                  </p>
+                )}
+                <div className="space-y-2 mb-4">
+                  {scanResult.items.map((item) => (
+                    <div key={item.rawToken} className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate text-white">{item.label}</p>
+                        <p className="text-xs text-white/40 truncate">
+                          {item.rawToken}
+                          {item.locked ? " 🔒" : item.confidence !== null ? ` (${Math.round(item.confidence * 100)}%)` : " (guess)"}
+                        </p>
+                      </div>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="DD/MM/YYYY"
+                        value={itemDates[item.rawToken] ?? ""}
+                        onChange={(e) => handleDateChange(item.rawToken, e.target.value)}
+                        className="w-28 bg-white/10 text-white text-xs px-2 py-1.5 rounded border border-white/20 focus:outline-none focus:border-primary placeholder-white/30 text-center"
+                      />
+                      <button
+                        onClick={() => handleConfirmItem(item.rawToken, item.label)}
+                        className="bg-green-600/80 hover:bg-green-600 text-white px-2.5 py-1.5 rounded text-xs shrink-0 leading-none"
+                      >
+                        ✓
+                      </button>
                     </div>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="DD/MM/YYYY"
-                      value={itemDates[item.rawToken] ?? ""}
-                      onChange={(e) => handleDateChange(item.rawToken, e.target.value)}
-                      className="w-28 bg-white/10 text-white text-xs px-2 py-1.5 rounded border border-white/20 focus:outline-none focus:border-primary placeholder-white/30 text-center"
-                    />
-                    <button
-                      onClick={() => handleConfirmItem(item.rawToken, item.label)}
-                      className="bg-green-600/80 hover:bg-green-600 text-white px-2.5 py-1.5 rounded text-xs shrink-0 leading-none"
-                    >
-                      ✓
-                    </button>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-col gap-2">
+            </div>
+            <div className="px-6 pb-6 pt-2 flex flex-col items-center gap-2">
+              <div className="max-w-sm w-full flex flex-col gap-2">
                 <button
                   onClick={handleDone}
                   className="bg-white text-black font-semibold px-6 py-2 rounded-full text-sm"
@@ -369,7 +384,7 @@ export default function BarcodeScanner({ onScanned, onClose }: Props) {
                 </button>
                 <button
                   onClick={handleRetake}
-                  className="text-white/60 text-sm underline"
+                  className="text-white/60 text-sm underline text-center"
                 >
                   Retake photo
                 </button>
