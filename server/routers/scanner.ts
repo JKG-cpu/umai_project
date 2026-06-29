@@ -4,6 +4,7 @@ import { ocrReceipt } from "../scanner/ocr";
 import { detectStore } from "../scanner/store-detection";
 import { filterItemTokens } from "../scanner/token-filter";
 import { resolveToken, recordVote } from "../scanner/vote-service";
+import { llmReceiptParse } from "../scanner/llm-receipt-parse";
 import { getStores, upsertStore } from "../scanner/db";
 
 export const scannerRouter = router({
@@ -29,10 +30,14 @@ export const scannerRouter = router({
           })
         );
 
+        const locale = storeResult.storeId?.split("-")[1] ?? "us";
+        const aiFoods = await llmReceiptParse(ocrText, locale);
+
         return {
           success: true,
           store: storeResult,
           items,
+          aiFoods,
           ocrText: ocrText.slice(0, 2000),
         };
       } catch (err: any) {
@@ -42,6 +47,7 @@ export const scannerRouter = router({
           error: err.message ?? "Receipt scan failed",
           store: null,
           items: [],
+          aiFoods: [],
           ocrText: null,
         };
       }
