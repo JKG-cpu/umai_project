@@ -1,0 +1,14 @@
+[build]
+  command = "pnpm run build"
+  publish = "dist/public"
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/index"
+  status = 200
+
+[[redirects]]
+  from = "/manus-storage/*"
+  to = "/.netlify/functions/index"
+  status = 200
